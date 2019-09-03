@@ -1,5 +1,16 @@
-#include <torch/torch.h>
+//# -*- coding:utf-8 -*-
+//# CenterNet_pytorch_win10_cuda10_py3.68
+//# @Author: 奇迹 QQ2737499951
+//# @Time: 2019/05/09 20:14
+//# @Blog: https://blog.csdn.net/qq_41895190/
+//# pytorch 深度学习实战QQ群 264191384
+//# pytorch+warpctc、CornerNet-Lite、CenterNet、YOLOv3、
+//# 中文识别、中文场景识别、chineseocr、野外场景文本识别、
+//# SENet、SKnet、注意力机制、金字塔注意力网络、关系图卷积网络(RGCNs)等
+//#===========================================
 
+
+#include <torch/extension.h>
 #include <vector>
 
 std::vector<at::Tensor> top_pool_forward(
@@ -11,18 +22,13 @@ std::vector<at::Tensor> top_pool_forward(
     // Get height
     int64_t height = input.size(2);
 
-    // Copy the last column
-    at::Tensor input_temp  = input.select(2, height - 1);
-    at::Tensor output_temp = output.select(2, height - 1);
-    output_temp.copy_(input_temp);
+    output.copy_(input);
 
-    at::Tensor max_temp;
-    for (int64_t ind = 1; ind < height; ++ind) {
-        input_temp  = input.select(2, height - ind - 1);
-        output_temp = output.select(2, height - ind);
-        max_temp    = output.select(2, height - ind - 1);
-
-        at::max_out(max_temp, input_temp, output_temp);
+    for (int64_t ind = 1; ind < height; ind <<= 1) {
+        at::Tensor max_temp = at::slice(output, 2, 0, height-ind);
+        at::Tensor cur_temp = at::slice(output, 2, 0, height-ind);
+        at::Tensor next_temp = at::slice(output, 2, ind, height);
+        at::max_out(max_temp, cur_temp, next_temp);
     }
 
     return { 
@@ -41,8 +47,8 @@ std::vector<at::Tensor> top_pool_backward(
     int32_t height  = input.size(2);
     int32_t width   = input.size(3);
 
-    auto max_val = at::zeros(torch::CUDA(at::kFloat), {batch, channel, width});
-    auto max_ind = at::zeros(torch::CUDA(at::kLong),  {batch, channel, width});
+    auto max_val = torch::zeros({batch, channel, width}, at::device(at::kCUDA).dtype(at::kFloat));
+    auto max_ind = torch::zeros({batch, channel, width}, at::device(at::kCUDA).dtype(at::kLong));
 
     auto input_temp = input.select(2, height - 1);
     max_val.copy_(input_temp);
@@ -54,8 +60,8 @@ std::vector<at::Tensor> top_pool_backward(
     output_temp.copy_(grad_output_temp);
 
     auto un_max_ind = max_ind.unsqueeze(2);
-    auto gt_mask    = at::zeros(torch::CUDA(at::kByte),  {batch, channel, width});
-    auto max_temp   = at::zeros(torch::CUDA(at::kFloat), {batch, channel, width});
+    auto gt_mask    = torch::zeros({batch, channel, width}, at::device(at::kCUDA).dtype(at::kByte));
+    auto max_temp   = torch::zeros({batch, channel, width}, at::device(at::kCUDA).dtype(at::kFloat));
     for (int32_t ind = 1; ind < height; ++ind) {
         input_temp = input.select(2, height - ind - 1);
         at::gt_out(gt_mask, input_temp, max_val);
